@@ -1,0 +1,127 @@
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+
+#define MAX_TRIES 6
+#define WORD_LEN 20
+
+int sem = 1;
+
+
+void sem_acquire(int *s) {
+  while (__sync_lock_test_and_set(s, 0) == 0);
+}
+
+void sem_release(int *s) {
+  __sync_lock_release(s);
+}
+
+
+int my_strcmp(const char *s1, const char *s2) {
+  while (*s1 && (*s1 == *s2)) {
+    s1++; s2++;
+  }
+  return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+}
+
+int my_strlen(const char *s) {
+  int len = 0;
+  while (s[len]) len++;
+  return len;
+}
+
+void play_hangman(int read_fd, int write_fd) {
+  char word[WORD_LEN];
+  char display[WORD_LEN];
+    int tries = 0;
+  int guessed[26] = {0};
+
+  read(read_fd, word, sizeof(word));
+  int len = my_strlen(word);
+
+  for (int i = 0; i < len; i++) {
+    display[i] = '_';
+  }
+  display[len] = '\0';
+
+  while (tries < MAX_TRIES) {
+    printf("Word: %s\n", display);
+    printf("Guess a letter: ");
+    char guess[2] = {0};
+    read(0, guess, 2);
+
+    if (guess[0] < 'a' || guess[0] > 'z') {
+      printf("Please enter a lowercase letter (a-z).\n");
+      continue;
+    }
+
+    if (guessed[guess[0] - 'a']) {
+      printf("Already guessed that letter!\n");
+      continue;
+    }
+
+    guessed[guess[0] - 'a'] = 1;
+
+    int found = 0;
+    for (int i = 0; i < len; i++) {
+      if (word[i] == guess[0]) {
+        display[i] = guess[0];
+        found = 1;
+    }
+    }
+
+    if (found) {
+      printf("✅ Good guess!\n");
+    } else {
+      tries++;
+      printf("❌ Wrong guess! Attempts left: %d\n", MAX_TRIES - tries);
+    }
+
+    if (my_strcmp(display, word) == 0) {
+      printf("🎉 You guessed the word: %s\n", word);
+      write(write_fd, "WIN", 4);
+      exit(0);
+    }
+  }
+
+  printf("💀 Game over. The word was: %s\n", word);
+  write(write_fd, "LOSE", 5);
+  exit(0);
+}
+
+int main() {
+  int p1[2];
+  int p2[2];
+
+  pipe(p1);
+  pipe(p2);
+
+  sem_acquire(&sem);
+
+  if (fork() == 0) {
+
+    close(p1[1]);
+    close(p2[0]);    
+play_hangman(p1[0], p2[1]);
+    close(p1[0]);
+    close(p2[1]);
+    exit(0);
+  } else {
+
+    close(p1[0]);
+    close(p2[1]);
+
+    char word[] = "hangman";
+    write(p1[1], word, sizeof(word));
+    close(p1[1]);
+
+    char result[10];
+    read(p2[0], result, sizeof(result));
+    printf("\nResult: %s\n", result);
+    close(p2[0]);
+    wait(0);
+  }
+
+  sem_release(&sem);
+  exit(0);
+}
