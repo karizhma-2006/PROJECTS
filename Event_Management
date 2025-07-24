@@ -1,0 +1,227 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_NAME_LENGTH 100
+#define MAX_DESC_LENGTH 200
+
+typedef struct TaskNode {
+    char task[MAX_DESC_LENGTH];
+    struct TaskNode* next;
+} TaskNode;
+
+typedef struct Event {
+    char name[MAX_NAME_LENGTH];
+    char description[MAX_DESC_LENGTH];
+    int day, month, year;
+    struct Event* left;
+    struct Event* right;
+    struct AdjNode* adj_list;
+} Event;
+
+typedef struct AdjNode {
+    Event* dependent_event;
+    struct AdjNode* next;
+} AdjNode;
+
+typedef struct Stack {
+    Event* events[MAX_NAME_LENGTH];
+    int top;
+} Stack;
+
+typedef struct Queue {
+    Event* events[MAX_NAME_LENGTH];
+    int front, rear;
+} Queue;
+
+Event* create_event(char* name, char* description, int day, int month, int year);
+void insert_event(Event** root, Event* new_event);
+Event* search_event(Event* root, char* name);
+void add_dependency(Event* event, Event* dependent);
+void print_events_in_dependency_order(Event* root);
+void print_events_in_order(Event* root);
+int compare_events(Event* e1, Event* e2);
+void add_task(TaskNode** head, char* task);
+void print_tasks(TaskNode* head);
+void push(Stack* stack, Event* event);
+Event* pop(Stack* stack);
+void print_undo(Stack* stack);
+void enqueue(Queue* q, Event* event);
+Event* dequeue(Queue* q);
+void print_upcoming_deadlines(Queue* q);
+
+int main() {
+    Event* events_bst = NULL;
+    Queue deadline_queue = {{NULL}, -1, -1};
+    Stack undo_stack = {{NULL}, -1};
+    TaskNode* task_list = NULL;
+
+    int num_events;
+    printf("Enter the number of events: ");
+    if (scanf("%d", &num_events) != 1 || num_events < 1) {
+        printf("Invalid number of events.\n");
+        return 1;
+    }
+    getchar();
+
+    for (int i = 0; i < num_events; i++) {
+        char name[MAX_NAME_LENGTH], description[MAX_DESC_LENGTH];
+        int day, month, year;
+
+        printf("\nEnter details for Event %d:\n", i + 1);
+        printf("Event Name: ");
+        fgets(name, sizeof(name), stdin);
+        name[strcspn(name, "\n")] = '\0';
+
+        printf("Event Description: ");
+        fgets(description, sizeof(description), stdin);
+        description[strcspn(description, "\n")] = '\0';
+
+        printf("Deadline (DD MM YYYY): ");
+        if (scanf("%d %d %d", &day, &month, &year) != 3 || day < 1 || day > 31 || month < 1 || month > 12) {
+            printf("Invalid date format.\n");
+            return 1;
+        }
+        getchar();
+
+        Event* new_event = create_event(name, description, day, month, year);
+        insert_event(&events_bst, new_event);
+        enqueue(&deadline_queue, new_event);
+        push(&undo_stack, new_event);
+    }
+
+    int num_dependencies;
+    printf("\nEnter the number of dependencies: ");
+    if (scanf("%d", &num_dependencies) != 1 || num_dependencies < 0) {
+        printf("Invalid number of dependencies.\n");
+        return 1;
+    }
+    getchar();
+
+    for (int i = 0; i < num_dependencies; i++) {
+        char event_name[MAX_NAME_LENGTH], dependent_name[MAX_NAME_LENGTH];
+        printf("\nDependency %d:\n", i + 1);
+        printf("Main event name: ");
+        fgets(event_name, sizeof(event_name), stdin);
+        event_name[strcspn(event_name, "\n")] = '\0';
+
+        printf("Dependent event name: ");
+        fgets(dependent_name, sizeof(dependent_name), stdin);
+        dependent_name[strcspn(dependent_name, "\n")] = '\0';
+
+        Event* event = search_event(events_bst, event_name);
+        Event* dependent = search_event(events_bst, dependent_name);
+
+        if (event && dependent) {
+            add_dependency(event, dependent);
+        } else {
+            printf("One or both events not found.\n");
+        }
+    }
+
+    int num_tasks;
+    printf("\nEnter the number of tasks for today: ");
+    if (scanf("%d", &num_tasks) != 1 || num_tasks < 1) {
+        printf("Invalid number of tasks.\n");
+        return 1;
+    }
+    getchar();
+
+    for (int i = 0; i < num_tasks; i++) {
+        char task[MAX_DESC_LENGTH];
+        printf("Task %d: ", i + 1);
+        fgets(task, sizeof(task), stdin);
+        task[strcspn(task, "\n")] = '\0';
+        add_task(&task_list, task);
+    }
+
+    printf("\nAll Events in Dependency Order:\n");
+    print_events_in_dependency_order(events_bst);
+
+    printf("\nTasks for the Day:\n");
+    print_tasks(task_list);
+
+    printf("\nUpcoming Deadlines:\n");
+    print_upcoming_deadlines(&deadline_queue);
+
+    printf("\nUndo Stack:\n");
+    print_undo(&undo_stack);
+
+    return 0;
+}
+
+Event* create_event(char* name, char* description, int day, int month, int year) {
+    Event* new_event = (Event*)malloc(sizeof(Event));
+    strcpy(new_event->name, name);
+    strcpy(new_event->description, description);
+    new_event->day = day;
+    new_event->month = month;
+    new_event->year = year;
+    new_event->left = NULL;
+    new_event->right = NULL;
+    new_event->adj_list = NULL;
+    return new_event;
+}
+
+void insert_event(Event** root, Event* new_event) {
+    if (*root == NULL) {
+        *root = new_event;
+    } else if (compare_events(new_event, *root) < 0) {
+        insert_event(&(*root)->left, new_event);
+    } else {
+        insert_event(&(*root)->right, new_event);
+    }
+}
+
+int compare_events(Event* e1, Event* e2) {
+    if (e1->year != e2->year) return e1->year - e2->year;
+    if (e1->month != e2->month) return e1->month - e2->month;
+    return e1->day - e2->day;
+}
+
+Event* search_event(Event* root, char* name) {
+    if (!root || strcmp(root->name, name) == 0) return root;
+    if (strcmp(name, root->name) < 0) return search_event(root->left, name);
+    return search_event(root->right, name);
+}
+
+void add_dependency(Event* event, Event* dependent) {
+    AdjNode* new_node = (AdjNode*)malloc(sizeof(AdjNode));
+    new_node->dependent_event = dependent;
+    new_node->next = event->adj_list;
+    event->adj_list = new_node;
+}
+
+void add_task(TaskNode** head, char* task) {
+    TaskNode* new_task = (TaskNode*)malloc(sizeof(TaskNode));
+    strcpy(new_task->task, task);
+    new_task->next = *head;
+    *head = new_task;
+}
+
+void print_tasks(TaskNode* head) {
+    TaskNode* current = head;
+    while (current != NULL) {
+        printf("- %s\n", current->task);
+        current = current->next;
+    }
+}
+
+void push(Stack* stack, Event* event) {
+    if (stack->top < MAX_NAME_LENGTH - 1) {
+        stack->events[++stack->top] = event;
+    }
+}
+
+Event* pop(Stack* stack) {
+    return (stack->top == -1) ? NULL : stack->events[stack->top--];
+}
+
+void print_undo(Stack* stack) {
+    for (int i = stack->top; i >= 0; i--) {
+        printf("Undo Event: %s\n", stack->events[i]->name);
+    }
+}
+
+void enqueue(Queue* q, Event* event) {
+    if (
